@@ -152,6 +152,10 @@ body{
   </div>
 
   <div class="controls">
+    <button class="ctl hidden" id="btnRetry" type="button">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 16v2a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2l2-3h8l2 3h2a2 2 0 0 1 2 2v9"/><circle cx="12" cy="13" r="3"/></svg>
+      Autoriser la caméra
+    </button>
     <a class="ctl hidden" id="btnChrome">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/><path d="M12 8h8.5M6.3 14 3.5 9.5M10.4 20.5l4.8-8.3"/></svg>
       Ouvrir dans Chrome
@@ -208,6 +212,7 @@ var video   = document.getElementById('video'),
     btnTorch = document.getElementById('btnTorch'),
     btnChrome= document.getElementById('btnChrome'),
     btnCopy  = document.getElementById('btnCopy'),
+    btnRetry = document.getElementById('btnRetry'),
     btnCam   = document.getElementById('btnCam'),
     codeForm = document.getElementById('codeForm'),
     codeInput= document.getElementById('codeInput'),
@@ -233,30 +238,58 @@ function setStatus(txt, cls){
 }
 
 /* ---------- Caméra ---------- */
+/* API moderne ou legacy (webkitGetUserMedia, comme les anciens scanners) */
+var gum = null, userTried = false;
+if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia){
+  gum = function(c){ return navigator.mediaDevices.getUserMedia(c); };
+} else {
+  var legacy = navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia;
+  if (legacy) gum = function(c){
+    return new Promise(function(res, rej){ legacy.call(navigator, c, res, rej); });
+  };
+}
+
 function startCam(){
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+  if (!gum){
     camFail("Ce navigateur ne permet pas le scan. Saisissez votre code ci-dessous.");
     return;
   }
   setStatus('Initialisation de la caméra…');
-  navigator.mediaDevices.getUserMedia({ video: { facingMode: facing, width:{ideal:1280}, height:{ideal:720} }, audio:false })
-  .then(function(s){
-    stream = s; track = s.getVideoTracks()[0];
-    video.srcObject = s;
-    video.play().catch(function(){});
-    camOff.classList.add('hidden');
-    running = true;
-    setStatus('Présentez le QR code devant la caméra…');
-    setupButtons();
-    requestAnimationFrame(scanLoop);
-  })
-  .catch(function(err){
+  requestCam({ video: { facingMode: facing, width:{ideal:1280}, height:{ideal:720} }, audio:false });
+}
+
+function onStream(s){
+  stream = s; track = s.getVideoTracks()[0];
+  video.srcObject = s;
+  video.play().catch(function(){});
+  camOff.classList.add('hidden');
+  running = true;
+  setStatus('Présentez le QR code devant la caméra…');
+  setupButtons();
+  requestAnimationFrame(scanLoop);
+}
+
+function requestCam(constraints){
+  gum(constraints).then(onStream).catch(function(err){
     var denied = err && (err.name==='NotAllowedError'||err.name==='SecurityError'||err.name==='PermissionDeniedError');
+    if (!denied && constraints.video !== true){
+      requestCam({ video: true, audio: false });   // contraintes trop exigeantes -> repli
+      return;
+    }
+    if (denied && !userTried){
+      // Certains navigateurs du portail refusent la demande automatique au
+      // chargement mais affichent le pop-up quand elle part d'un toucher.
+      camOffMsg.innerHTML = "Une autorisation est nécessaire.<br>Touchez « Autoriser la caméra » puis acceptez la demande.";
+      camOff.classList.remove('hidden');
+      btnRetry.classList.remove('hidden');
+      setStatus("Autorisation caméra nécessaire.", 'err');
+      return;
+    }
     var m = denied
       ? "Accès caméra refusé par ce navigateur."
       : "Caméra indisponible sur ce navigateur.";
     camFail(m);
-    // Le mini-navigateur du portail ne demande jamais l'autorisation :
+    // Le mini-navigateur du portail ne demande pas toujours l'autorisation :
     // proposer d'ouvrir la page dans un vrai navigateur.
     if (/android/i.test(navigator.userAgent)){
       btnChrome.href = 'intent://' + location.host + location.pathname + location.search +
@@ -291,6 +324,13 @@ btnTorch.addEventListener('click', function(){
   track.applyConstraints({ advanced:[{ torch: torchOn }] }).then(function(){
     btnTorch.classList.toggle('on', torchOn);
   }).catch(function(){ torchOn = !torchOn; });
+});
+
+btnRetry.addEventListener('click', function(){
+  userTried = true;                       // demande declenchee par un toucher
+  btnRetry.classList.add('hidden');
+  camOff.classList.add('hidden');
+  startCam();
 });
 
 btnCopy.addEventListener('click', function(){
