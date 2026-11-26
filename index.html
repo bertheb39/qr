@@ -152,6 +152,14 @@ body{
   </div>
 
   <div class="controls">
+    <a class="ctl hidden" id="btnChrome">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/><path d="M12 8h8.5M6.3 14 3.5 9.5M10.4 20.5l4.8-8.3"/></svg>
+      Ouvrir dans Chrome
+    </a>
+    <button class="ctl hidden" id="btnCopy" type="button">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+      Copier le lien
+    </button>
     <button class="ctl hidden" id="btnTorch" type="button">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2h6l-1 7h4L9 22l1.5-9H6z"/></svg>
       Torche
@@ -198,6 +206,8 @@ var video   = document.getElementById('video'),
     status  = document.getElementById('status'),
     statusTxt = document.getElementById('statusTxt'),
     btnTorch = document.getElementById('btnTorch'),
+    btnChrome= document.getElementById('btnChrome'),
+    btnCopy  = document.getElementById('btnCopy'),
     btnCam   = document.getElementById('btnCam'),
     codeForm = document.getElementById('codeForm'),
     codeInput= document.getElementById('codeInput'),
@@ -241,10 +251,23 @@ function startCam(){
     requestAnimationFrame(scanLoop);
   })
   .catch(function(err){
-    var m = (err && (err.name==='NotAllowedError'||err.name==='SecurityError'))
-      ? "Accès caméra refusé. Autorisez la caméra puis rechargez la page."
-      : "Caméra indisponible. Saisissez votre code ci-dessous.";
+    var denied = err && (err.name==='NotAllowedError'||err.name==='SecurityError'||err.name==='PermissionDeniedError');
+    var m = denied
+      ? "Accès caméra refusé par ce navigateur."
+      : "Caméra indisponible sur ce navigateur.";
     camFail(m);
+    // Le mini-navigateur du portail ne demande jamais l'autorisation :
+    // proposer d'ouvrir la page dans un vrai navigateur.
+    if (/android/i.test(navigator.userAgent)){
+      btnChrome.href = 'intent://' + location.host + location.pathname + location.search +
+        '#Intent;scheme=https;package=com.android.chrome;end';
+      btnChrome.classList.remove('hidden');
+      camOffMsg.innerHTML = m + '<br>Ouvrez cette page dans Chrome pour autoriser la caméra.';
+    } else {
+      btnCopy.classList.remove('hidden');
+      camOffMsg.innerHTML = m + '<br>Ouvrez cette page dans Safari ou Chrome pour autoriser la caméra.';
+    }
+    camOffMsg.innerHTML += '<br>… ou saisissez votre code ci-dessous.';
   });
 }
 
@@ -268,6 +291,20 @@ btnTorch.addEventListener('click', function(){
   track.applyConstraints({ advanced:[{ torch: torchOn }] }).then(function(){
     btnTorch.classList.toggle('on', torchOn);
   }).catch(function(){ torchOn = !torchOn; });
+});
+
+btnCopy.addEventListener('click', function(){
+  var url = location.href;
+  function done(){ setStatus('Lien copié — collez-le dans Safari ou Chrome.', 'ok'); }
+  if (navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(url).then(done).catch(function(){ legacyCopy(); });
+  } else legacyCopy();
+  function legacyCopy(){
+    var t = document.createElement('textarea');
+    t.value = url; document.body.appendChild(t);
+    t.select(); try{ document.execCommand('copy'); done(); }catch(e){}
+    document.body.removeChild(t);
+  }
 });
 
 btnCam.addEventListener('click', function(){
